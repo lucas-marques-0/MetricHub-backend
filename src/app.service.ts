@@ -94,6 +94,7 @@ export class AppService {
         const clientesAtivos = clientesAtivosPorMes[mesAno];
         const clientesCancelados = clientesCanceladosPorMes[mesAno] || 0;
         const churnRate = (clientesCancelados / clientesAtivos) * 100;
+        
         churnRatePorMes[mesAno] = churnRate;
       }
     }
@@ -107,8 +108,10 @@ export class AppService {
 
   private formatMetrics(results) {
     const { mrr, cr } = results;
+
     const mrrKeys = this.organizeDate(Object.keys(mrr));
     const mrrValues = this.organizeValue(mrrKeys.map(key => mrr[key]));
+
     const crKeys = this.organizeDate(Object.keys(cr));
     const crValues = crKeys.map(key => cr[key]);
 
@@ -119,6 +122,7 @@ export class AppService {
     return keys.sort((a, b) => {
       const [aMonth, aYear] = a.split('/').map(Number);
       const [bMonth, bYear] = b.split('/').map(Number);
+
       return aYear !== bYear ? aYear - bYear : aMonth - bMonth;
     });
   };
