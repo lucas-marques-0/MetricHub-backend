@@ -16,30 +16,22 @@ export class AppService {
     if(this.verifiyObject(mrr) && this.verifiyObject(cr)) return this.formatMetrics({ mrr, cr });
   }
 
-  private formatMetrics(results) {
-    const { mrr, cr } = results;
-    const mrrKeys = this.organizeDate(Object.keys(mrr));
-    const mrrValues = this.organizeValue(mrrKeys.map(key => mrr[key]));
-    const crKeys = this.organizeDate(Object.keys(cr));
-    const crValues = crKeys.map(key => cr[key]);
-
-    return { mrr: { keys: mrrKeys, values: mrrValues }, cr: { keys: crKeys, values: crValues } };
+  private processXLSX(filePath: string) {
+    const workbook = xlsx.readFile(filePath);
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    return xlsx.utils.sheet_to_json(sheet, { raw: false });
   }
 
-  private organizeDate(keys) {
-    return keys.sort((a, b) => {
-      const [aMonth, aYear] = a.split('/').map(Number);
-      const [bMonth, bYear] = b.split('/').map(Number);
-      return aYear !== bYear ? aYear - bYear : aMonth - bMonth;
+  private processCSV(filePath: string) {
+    return new Promise((resolve, reject) => {
+      const results = [];
+      fs.createReadStream(filePath)
+        .pipe(csv())
+        .on('data', (data) => results.push(data))
+        .on('end', () => resolve(results))
+        .on('error', (error) => reject(error));
     });
-  };
-
-  private organizeValue(values) {
-    return values.map(value => parseFloat(value.toFixed(2)));
-  }
-
-  private verifiyObject(object) {
-    return Object.keys(object).length > 0 || Object.values(object).length > 0;
   }
 
   private calculateMRR(data) {
@@ -53,18 +45,19 @@ export class AppService {
       const intervaloCobrancas = subscriber['cobrada a cada X dias'];
       const quantCobrancas = subscriber['quantidade cobranças'];
 
+      // Adicionar o valor da assinatura para cada mês de acordo com a quantidade de cobranças. 
       if (statusAssinatura === 'Ativa' || statusAssinatura === 'Cancelada') {
         if(intervaloCobrancas === '30') {
           for (let i = 0; i < quantCobrancas; i++) {
             const mesAno = `${(dataInicio.getMonth() + i) % 12 + 1}/${dataInicio.getFullYear()}`;
             mrrPorMes[mesAno] = (mrrPorMes[mesAno] || 0) + valorAssinatura;
           }
-        } else {
+        } else { // Se a cobrança não for mensal, adicionar o valor no mês único da compra.
           const mesAno = `${dataInicio.getMonth() + 1}/${dataInicio.getFullYear()}`;
           mrrPorMes[mesAno] = (mrrPorMes[mesAno] || 0) + valorAssinatura;
         }
       }
-      if (statusAssinatura === 'Atrasada') {
+      if (statusAssinatura === 'Atrasada') { // Adcionar o valor pago nos meses entre o inicio e o mês de atraso.
         const diferencaMeses = (dataStatus.getFullYear() - dataInicio.getFullYear()) * 12 + (dataStatus.getMonth() - dataInicio.getMonth());
         for (let i = 0; i < diferencaMeses; i++) {
           const mesAno = `${(dataInicio.getMonth() + i) % 12 + 1}/${dataInicio.getFullYear()}`;
@@ -86,14 +79,16 @@ export class AppService {
       const dataStatus = new Date(subscriber['data status']);
       const status = subscriber['status'];
       
+      // Passar por todos os clientes e adicioanr o mês em que ele iniciou (ficou ativo).
       const mesAnoInicio = `${dataInicio.getMonth() + 1}/${dataInicio.getFullYear()}`;
       clientesAtivosPorMes[mesAnoInicio] = (clientesAtivosPorMes[mesAnoInicio] || 0) + 1;
-      if (status === 'Cancelada') {
+      if (status === 'Cancelada') { // Caso o status for 'Cancelada', adicionar o mês em que o cliente cancelou.
         const mesAnoStatus = `${dataStatus.getMonth() + 1}/${dataStatus.getFullYear()}`;
         clientesCanceladosPorMes[mesAnoStatus] = (clientesCanceladosPorMes[mesAnoStatus] || 0) + 1;
       }
     });
     
+    // Tendo uma lista dos clientes ativos no início de cada MÊS/ANO, e cancelados de cada MÊS/ANO... podemos fazer o cálculo do CR pegando os valores correspondentes entre as listas. -> ex: clientesAtivos[03/2022] com clientesCancelados[03/2022].
     for (const mesAno in clientesAtivosPorMes) {
       if (clientesAtivosPorMes.hasOwnProperty(mesAno)) {
         const clientesAtivos = clientesAtivosPorMes[mesAno];
@@ -106,21 +101,29 @@ export class AppService {
     return churnRatePorMes;
   }
 
-  private processXLSX(filePath: string) {
-    const workbook = xlsx.readFile(filePath);
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    return xlsx.utils.sheet_to_json(sheet, { raw: false });
+  private verifiyObject(object) {
+    return Object.keys(object).length > 0 || Object.values(object).length > 0;
   }
 
-  private processCSV(filePath: string) {
-    return new Promise((resolve, reject) => {
-      const results = [];
-      fs.createReadStream(filePath)
-        .pipe(csv())
-        .on('data', (data) => results.push(data))
-        .on('end', () => resolve(results))
-        .on('error', (error) => reject(error));
+  private formatMetrics(results) {
+    const { mrr, cr } = results;
+    const mrrKeys = this.organizeDate(Object.keys(mrr));
+    const mrrValues = this.organizeValue(mrrKeys.map(key => mrr[key]));
+    const crKeys = this.organizeDate(Object.keys(cr));
+    const crValues = crKeys.map(key => cr[key]);
+
+    return { mrr: { keys: mrrKeys, values: mrrValues }, cr: { keys: crKeys, values: crValues } };
+  }
+
+  private organizeDate(keys) {
+    return keys.sort((a, b) => {
+      const [aMonth, aYear] = a.split('/').map(Number);
+      const [bMonth, bYear] = b.split('/').map(Number);
+      return aYear !== bYear ? aYear - bYear : aMonth - bMonth;
     });
+  };
+
+  private organizeValue(values) {
+    return values.map(value => parseFloat(value.toFixed(2)));
   }
 }
